@@ -62,6 +62,51 @@ class PrayerLogicService {
     return entry.copyWith(status: PrayerCompletionStatus.prayed, prayedAt: now);
   }
 
+  /// Applies a manual correction to one prayer entry.
+  ///
+  /// Validation rule:
+  /// - If status is prayed, [prayedAt] must be inside the prayer window
+  ///   (startTime <= prayedAt <= endTime).
+  PrayerTimeEntry applyManualPrayerCorrection(
+    PrayerTimeEntry entry, {
+    required PrayerCompletionStatus status,
+    required DateTime now,
+    DateTime? prayedAt,
+  }) {
+    if (now.isBefore(entry.startTime)) {
+      throw ArgumentError('Future prayers cannot be edited yet.');
+    }
+
+    if (status == PrayerCompletionStatus.pending) {
+      throw ArgumentError(
+        'Pending is not allowed for manual correction. Choose prayed or missed.',
+      );
+    }
+
+    if (status == PrayerCompletionStatus.prayed) {
+      if (prayedAt == null) {
+        throw ArgumentError('Prayed time is required when status is prayed.');
+      }
+
+      final isBeforeStart = prayedAt.isBefore(entry.startTime);
+      final isAfterEnd = prayedAt.isAfter(entry.endTime);
+      if (isBeforeStart || isAfterEnd) {
+        throw ArgumentError('Prayed time must be within the prayer window.');
+      }
+
+      if (prayedAt.isAfter(now)) {
+        throw ArgumentError('Prayed time cannot be in the future.');
+      }
+
+      return entry.copyWith(
+        status: PrayerCompletionStatus.prayed,
+        prayedAt: prayedAt,
+      );
+    }
+
+    return entry.copyWith(status: status, clearPrayedAt: true);
+  }
+
   /// Records reminder metadata after a reminder was triggered.
   PrayerTimeEntry recordReminderSent(PrayerTimeEntry entry, DateTime now) {
     return entry.copyWith(

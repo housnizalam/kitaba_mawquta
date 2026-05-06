@@ -5,7 +5,7 @@ enum PrayerType { fajr, dhuhr, asr, maghrib, isha }
 enum PrayerCompletionStatus { pending, prayed, missed }
 
 /// Supported app languages.
-enum AppLanguage { english, arabic }
+enum AppLanguage { english, arabic, german }
 
 /// Defines how the app gets location data.
 enum LocationMode { auto, manual }

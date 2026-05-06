@@ -14,6 +14,8 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
     final locationService = ref.read(userLocationStorageServiceProvider);
     final scheduleService = ref.read(todayScheduleStorageServiceProvider);
     final historyService = ref.read(dailyPrayerHistoryStorageServiceProvider);
+    final scheduleBuilder = ref.read(prayerScheduleBuilderServiceProvider);
+    final demoDataService = ref.read(devDemoDataServiceProvider);
     final prayerLogicService = ref.read(prayerLogicServiceProvider);
 
     final now = DateTime.now();
@@ -21,19 +23,38 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
     final settings =
         await settingsService.loadSettings() ??
         AppStateDefaults.defaultSettings();
-    final location =
-        await locationService.loadLocation() ??
-        AppStateDefaults.defaultLocation();
-    final loadedSchedule =
-        await scheduleService.loadTodaySchedule() ??
-        AppStateDefaults.defaultTodaySchedule(now: now);
+    final persistedLocation = await locationService.loadLocation();
+    final persistedSchedule = await scheduleService.loadTodaySchedule();
+
+    var location = persistedLocation ?? AppStateDefaults.defaultLocation();
+    var loadedSchedule =
+        persistedSchedule ?? AppStateDefaults.defaultTodaySchedule(now: now);
+
+    final useDemoLocation = demoDataService.isLocationMissing(location);
+    final useDemoSchedule = demoDataService.isScheduleMissing(loadedSchedule);
+
+    if (useDemoLocation) {
+      location = demoDataService.buildDemoLocation(now: now);
+    }
+
+    if (useDemoSchedule) {
+      loadedSchedule = demoDataService.buildDemoSchedule(
+        scheduleBuilder,
+        now: now,
+      );
+    }
+
     final todaySchedule = prayerLogicService.synchronizeDayPrayerStatuses(
       loadedSchedule,
       now,
     );
     final history = await historyService.loadAllDailyLogs();
 
-    await scheduleService.saveTodaySchedule(todaySchedule);
+    // Persist schedule updates only when schedule data is real.
+    // Demo schedules stay in-memory and are not written to storage.
+    if (!useDemoSchedule) {
+      await scheduleService.saveTodaySchedule(todaySchedule);
+    }
 
     final tracking = _buildTrackingFromSchedule(
       schedule: todaySchedule,
@@ -178,6 +199,47 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
 
     final synchronizedSchedule = prayerLogicService
         .synchronizeDayPrayerStatuses(markedSchedule, effectiveNow);
+
+    await ref
+        .read(todayScheduleStorageServiceProvider)
+        .saveTodaySchedule(synchronizedSchedule);
+
+    final tracking = _buildTrackingFromSchedule(
+      schedule: synchronizedSchedule,
+      currentTracking: current.tracking,
+      now: effectiveNow,
+      prayerLogicService: prayerLogicService,
+    );
+
+    state = AsyncValue.data(
+      current.copyWith(todaySchedule: synchronizedSchedule, tracking: tracking),
+    );
+  }
+
+  /// Applies a manual prayer status/time correction and persists it.
+  Future<void> manuallyEditPrayerEntry(
+    PrayerType prayerType, {
+    required PrayerCompletionStatus status,
+    DateTime? prayedAt,
+    DateTime? now,
+  }) async {
+    final current = await _currentState();
+    final prayerLogicService = ref.read(prayerLogicServiceProvider);
+    final effectiveNow = now ?? DateTime.now();
+
+    final updatedSchedule = prayerLogicService.updatePrayerInSchedule(
+      current.todaySchedule,
+      prayerType,
+      (entry) => prayerLogicService.applyManualPrayerCorrection(
+        entry,
+        status: status,
+        now: effectiveNow,
+        prayedAt: prayedAt,
+      ),
+    );
+
+    final synchronizedSchedule = prayerLogicService
+        .synchronizeDayPrayerStatuses(updatedSchedule, effectiveNow);
 
     await ref
         .read(todayScheduleStorageServiceProvider)

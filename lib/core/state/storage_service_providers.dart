@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../dev/dev.dart';
 import '../logic/logic.dart';
 import '../schedule/schedule.dart';
 import '../storage/storage.dart';
@@ -37,3 +38,8 @@ final prayerScheduleBuilderServiceProvider =
       (ref) =>
           PrayerScheduleBuilderService(ref.read(prayerLogicServiceProvider)),
     );
+
+/// Provides temporary development demo data helpers.
+final devDemoDataServiceProvider = Provider<DevDemoDataService>(
+  (ref) => DevDemoDataService(),
+);
