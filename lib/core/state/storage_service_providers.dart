@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../logic/logic.dart';
 import '../storage/storage.dart';
 
 /// Provides app settings storage access.
@@ -23,3 +24,8 @@ final dailyPrayerHistoryStorageServiceProvider =
     Provider<DailyPrayerHistoryStorageService>(
       (ref) => DailyPrayerHistoryStorageService(),
     );
+
+/// Provides pure prayer business logic helpers.
+final prayerLogicServiceProvider = Provider<PrayerLogicService>(
+  (ref) => PrayerLogicService(),
+);

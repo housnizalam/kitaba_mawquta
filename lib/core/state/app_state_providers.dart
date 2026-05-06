@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import 'app_state_notifier.dart';
+import 'storage_service_providers.dart';
 
 /// Convenience provider for app settings.
 final settingsProvider = Provider<AppSettings?>((ref) {
@@ -28,6 +29,48 @@ final historyProvider = Provider<List<DailyPrayerLog>>((ref) {
   return ref.watch(appStateNotifierProvider).valueOrNull?.history ?? const [];
 });
 
+/// Current active prayer entry derived from today's schedule.
+final currentActivePrayerEntryProvider = Provider<PrayerTimeEntry?>((ref) {
+  final appState = ref.watch(appStateNotifierProvider).valueOrNull;
+  if (appState == null) {
+    return null;
+  }
+
+  final prayerLogic = ref.watch(prayerLogicServiceProvider);
+  return prayerLogic.getCurrentActivePrayerEntry(
+    appState.todaySchedule,
+    DateTime.now(),
+  );
+});
+
+/// Next upcoming prayer entry derived from today's schedule.
+final nextUpcomingPrayerEntryProvider = Provider<PrayerTimeEntry?>((ref) {
+  final appState = ref.watch(appStateNotifierProvider).valueOrNull;
+  if (appState == null) {
+    return null;
+  }
+
+  final prayerLogic = ref.watch(prayerLogicServiceProvider);
+  return prayerLogic.getNextUpcomingPrayerEntry(
+    appState.todaySchedule,
+    DateTime.now(),
+  );
+});
+
+/// Countdown end time for the currently active prayer.
+final currentPrayerCountdownEndProvider = Provider<DateTime?>((ref) {
+  final appState = ref.watch(appStateNotifierProvider).valueOrNull;
+  if (appState == null) {
+    return null;
+  }
+
+  final prayerLogic = ref.watch(prayerLogicServiceProvider);
+  return prayerLogic.getCountdownEndTimeForCurrentPrayer(
+    appState.todaySchedule,
+    DateTime.now(),
+  );
+});
+
 /// Tries to derive the current prayer from tracking or today's schedule.
 final currentPrayerProvider = Provider<PrayerType?>((ref) {
   final appState = ref.watch(appStateNotifierProvider).valueOrNull;
@@ -40,14 +83,5 @@ final currentPrayerProvider = Provider<PrayerType?>((ref) {
     return fromTracking;
   }
 
-  final now = DateTime.now();
-  for (final prayer in appState.todaySchedule.prayers) {
-    final hasStarted = !now.isBefore(prayer.startTime);
-    final hasNotEnded = now.isBefore(prayer.endTime);
-    if (hasStarted && hasNotEnded) {
-      return prayer.prayerType;
-    }
-  }
-
-  return null;
+  return ref.watch(currentActivePrayerEntryProvider)?.prayerType;
 });

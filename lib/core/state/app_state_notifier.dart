@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../logic/logic.dart';
 import '../models/models.dart';
 import 'app_state_defaults.dart';
 import 'storage_service_providers.dart';
@@ -12,6 +13,7 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
     final locationService = ref.read(userLocationStorageServiceProvider);
     final scheduleService = ref.read(todayScheduleStorageServiceProvider);
     final historyService = ref.read(dailyPrayerHistoryStorageServiceProvider);
+    final prayerLogicService = ref.read(prayerLogicServiceProvider);
 
     final now = DateTime.now();
 
@@ -21,16 +23,29 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
     final location =
         await locationService.loadLocation() ??
         AppStateDefaults.defaultLocation();
-    final todaySchedule =
+    final loadedSchedule =
         await scheduleService.loadTodaySchedule() ??
         AppStateDefaults.defaultTodaySchedule(now: now);
+    final todaySchedule = prayerLogicService.synchronizeDayPrayerStatuses(
+      loadedSchedule,
+      now,
+    );
     final history = await historyService.loadAllDailyLogs();
+
+    await scheduleService.saveTodaySchedule(todaySchedule);
+
+    final tracking = _buildTrackingFromSchedule(
+      schedule: todaySchedule,
+      currentTracking: AppStateDefaults.defaultTrackingState(),
+      now: now,
+      prayerLogicService: prayerLogicService,
+    );
 
     return AppState(
       settings: settings,
       location: location,
       todaySchedule: todaySchedule,
-      tracking: AppStateDefaults.defaultTrackingState(),
+      tracking: tracking,
       history: history,
     );
   }
@@ -67,10 +82,28 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
 
   Future<void> saveTodaySchedule(DailyPrayerSchedule schedule) async {
     final current = await _currentState();
+    final prayerLogicService = ref.read(prayerLogicServiceProvider);
+    final now = DateTime.now();
+
+    final syncedSchedule = prayerLogicService.synchronizeDayPrayerStatuses(
+      schedule,
+      now,
+    );
+
     await ref
         .read(todayScheduleStorageServiceProvider)
-        .saveTodaySchedule(schedule);
-    state = AsyncValue.data(current.copyWith(todaySchedule: schedule));
+        .saveTodaySchedule(syncedSchedule);
+
+    final tracking = _buildTrackingFromSchedule(
+      schedule: syncedSchedule,
+      currentTracking: current.tracking,
+      now: now,
+      prayerLogicService: prayerLogicService,
+    );
+
+    state = AsyncValue.data(
+      current.copyWith(todaySchedule: syncedSchedule, tracking: tracking),
+    );
   }
 
   Future<void> clearTodaySchedule() async {
@@ -102,6 +135,112 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
     state = AsyncValue.data(current.copyWith(tracking: trackingState));
   }
 
+  /// Synchronizes today's prayer statuses using current runtime rules.
+  Future<void> synchronizeTodayPrayerStatuses({DateTime? now}) async {
+    final current = await _currentState();
+    final prayerLogicService = ref.read(prayerLogicServiceProvider);
+    final effectiveNow = now ?? DateTime.now();
+
+    final synchronizedSchedule = prayerLogicService
+        .synchronizeDayPrayerStatuses(current.todaySchedule, effectiveNow);
+
+    await ref
+        .read(todayScheduleStorageServiceProvider)
+        .saveTodaySchedule(synchronizedSchedule);
+
+    final tracking = _buildTrackingFromSchedule(
+      schedule: synchronizedSchedule,
+      currentTracking: current.tracking,
+      now: effectiveNow,
+      prayerLogicService: prayerLogicService,
+    );
+
+    state = AsyncValue.data(
+      current.copyWith(todaySchedule: synchronizedSchedule, tracking: tracking),
+    );
+  }
+
+  /// Marks the selected prayer as prayed and persists updated schedule.
+  Future<void> markPrayerAsPrayed(
+    PrayerType prayerType, {
+    DateTime? now,
+  }) async {
+    final current = await _currentState();
+    final prayerLogicService = ref.read(prayerLogicServiceProvider);
+    final effectiveNow = now ?? DateTime.now();
+
+    final markedSchedule = prayerLogicService.updatePrayerInSchedule(
+      current.todaySchedule,
+      prayerType,
+      (entry) => prayerLogicService.markPrayerAsPrayed(entry, effectiveNow),
+    );
+
+    final synchronizedSchedule = prayerLogicService
+        .synchronizeDayPrayerStatuses(markedSchedule, effectiveNow);
+
+    await ref
+        .read(todayScheduleStorageServiceProvider)
+        .saveTodaySchedule(synchronizedSchedule);
+
+    final tracking = _buildTrackingFromSchedule(
+      schedule: synchronizedSchedule,
+      currentTracking: current.tracking,
+      now: effectiveNow,
+      prayerLogicService: prayerLogicService,
+    );
+
+    state = AsyncValue.data(
+      current.copyWith(todaySchedule: synchronizedSchedule, tracking: tracking),
+    );
+  }
+
+  /// Updates reminder metadata for one prayer and persists updated schedule.
+  Future<void> recordReminderSentForPrayer(
+    PrayerType prayerType, {
+    DateTime? now,
+  }) async {
+    final current = await _currentState();
+    final prayerLogicService = ref.read(prayerLogicServiceProvider);
+    final effectiveNow = now ?? DateTime.now();
+
+    final updatedSchedule = prayerLogicService.updatePrayerInSchedule(
+      current.todaySchedule,
+      prayerType,
+      (entry) => prayerLogicService.recordReminderSent(entry, effectiveNow),
+    );
+
+    await ref
+        .read(todayScheduleStorageServiceProvider)
+        .saveTodaySchedule(updatedSchedule);
+
+    final tracking = _buildTrackingFromSchedule(
+      schedule: updatedSchedule,
+      currentTracking: current.tracking,
+      now: effectiveNow,
+      prayerLogicService: prayerLogicService,
+    );
+
+    state = AsyncValue.data(
+      current.copyWith(todaySchedule: updatedSchedule, tracking: tracking),
+    );
+  }
+
+  /// Refreshes runtime tracking from the current schedule.
+  Future<void> refreshTrackingFromTodaySchedule({DateTime? now}) async {
+    final current = await _currentState();
+    final prayerLogicService = ref.read(prayerLogicServiceProvider);
+    final effectiveNow = now ?? DateTime.now();
+
+    final tracking = _buildTrackingFromSchedule(
+      schedule: current.todaySchedule,
+      currentTracking: current.tracking,
+      now: effectiveNow,
+      prayerLogicService: prayerLogicService,
+    );
+
+    state = AsyncValue.data(current.copyWith(tracking: tracking));
+  }
+
   Future<void> clearAllStoredSections() async {
     final now = DateTime.now();
 
@@ -120,6 +259,32 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
     }
 
     return future;
+  }
+
+  PrayerTrackingState _buildTrackingFromSchedule({
+    required DailyPrayerSchedule schedule,
+    required PrayerTrackingState currentTracking,
+    required DateTime now,
+    required PrayerLogicService prayerLogicService,
+  }) {
+    final activeEntry = prayerLogicService.getCurrentActivePrayerEntry(
+      schedule,
+      now,
+    );
+
+    final countdownEndsAt = prayerLogicService
+        .getCountdownEndTimeForCurrentPrayer(schedule, now);
+
+    return PrayerTrackingState(
+      currentPrayerType: activeEntry?.prayerType,
+      isReminderActive: activeEntry == null
+          ? false
+          : currentTracking.isReminderActive,
+      nextReminderAt: activeEntry == null
+          ? null
+          : currentTracking.nextReminderAt,
+      countdownEndsAt: countdownEndsAt,
+    );
   }
 
   List<DailyPrayerLog> _replaceLogByDate(
