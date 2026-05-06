@@ -8,6 +8,7 @@ import '../../core/models/models.dart';
 import '../../core/state/app_state_notifier.dart';
 import '../../core/state/app_state_providers.dart';
 import '../../core/state/storage_service_providers.dart';
+import '../settings/settings_page.dart';
 import '../../shared/widgets/constrained_page_body.dart';
 
 /// Main home screen for the prayer app.
@@ -22,19 +23,16 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   Timer? _clockTimer;
-  DateTime _now = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) {
         return;
       }
 
-      setState(() {
-        _now = DateTime.now();
-      });
+      setState(() {});
     });
   }
 
@@ -45,9 +43,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _markCurrentPrayerAsPrayed(PrayerTimeEntry entry) async {
+    final effectiveNow = DateTime.now();
     await ref
         .read(appStateNotifierProvider.notifier)
-        .markPrayerAsPrayed(entry.prayerType, now: _now);
+        .markPrayerAsPrayed(entry.prayerType, now: effectiveNow);
 
     if (!mounted) {
       return;
@@ -60,9 +59,17 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  void _showSettingsPlaceholder() {
+  Future<void> _openSettingsPage() async {
+    final didSave = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => const SettingsPage()));
+
+    if (!mounted || didSave != true) {
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings page will be added next.')),
+      const SnackBar(content: Text('Settings saved successfully.')),
     );
   }
 
@@ -77,7 +84,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _openPrayerEditDialog(PrayerTimeEntry entry) async {
-    if (_now.isBefore(entry.startTime)) {
+    final effectiveNow = DateTime.now();
+    if (effectiveNow.isBefore(entry.startTime)) {
       if (!mounted) {
         return;
       }
@@ -148,7 +156,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   return;
                 }
 
-                if (selectedPrayedAt!.isAfter(_now)) {
+                if (selectedPrayedAt!.isAfter(effectiveNow)) {
                   setDialogState(() {
                     errorMessage = 'Prayed time cannot be in the future.';
                   });
@@ -163,7 +171,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                       entry.prayerType,
                       status: selectedStatus,
                       prayedAt: selectedPrayedAt,
-                      now: _now,
+                      now: effectiveNow,
                     );
               } on ArgumentError catch (e) {
                 setDialogState(() {
@@ -278,6 +286,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final effectiveNow = DateTime.now();
     final appStateAsync = ref.watch(appStateNotifierProvider);
     final location = ref.watch(locationProvider);
     final schedule = ref.watch(todayScheduleProvider);
@@ -288,7 +297,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       appBar: AppBar(
         automaticallyImplyLeading: false,
         leading: IconButton(
-          onPressed: _showSettingsPlaceholder,
+          onPressed: _openSettingsPage,
           icon: const Icon(Icons.settings_outlined),
           tooltip: 'Settings',
         ),
@@ -306,7 +315,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           final prayers = schedule?.prayers ?? const <PrayerTimeEntry>[];
           final activePrayer = schedule == null
               ? null
-              : prayerLogic.getCurrentActivePrayerEntry(schedule, _now);
+              : prayerLogic.getCurrentActivePrayerEntry(schedule, effectiveNow);
           final latestPrayedPrayer =
               prayers.where((entry) => entry.prayedAt != null).toList()
                 ..sort((a, b) => b.prayedAt!.compareTo(a.prayedAt!));
@@ -315,7 +324,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               : latestPrayedPrayer.first;
           final nextPrayer = schedule == null
               ? null
-              : prayerLogic.getNextUpcomingPrayerEntry(schedule, _now);
+              : prayerLogic.getNextUpcomingPrayerEntry(schedule, effectiveNow);
 
           return ConstrainedPageBody(
             child: ListView(
@@ -329,14 +338,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _formatDate(_now),
+                  _formatDate(effectiveNow),
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 24),
                 _CurrentPrayerCard(
-                  now: _now,
+                  now: effectiveNow,
                   activePrayer: activePrayer,
                   prayedPrayer: prayedPrayer,
                   nextPrayer: nextPrayer,
@@ -356,7 +365,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
                 const SizedBox(height: 12),
                 if (prayers.isEmpty)
-                  _EmptyPrayerListCard(now: _now)
+                  _EmptyPrayerListCard(now: effectiveNow)
                 else
                   ...prayers.map(
                     (entry) => Padding(
@@ -365,9 +374,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                         entry: entry,
                         runtimeStatus: prayerLogic.determinePrayerRuntimeStatus(
                           entry,
-                          _now,
+                          effectiveNow,
                         ),
-                        isEditable: !entry.startTime.isAfter(_now),
+                        isEditable: !entry.startTime.isAfter(effectiveNow),
                         onEdit: () => _openPrayerEditDialog(entry),
                       ),
                     ),
@@ -401,13 +410,13 @@ class _CurrentPrayerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cardPrayer = activePrayer ?? prayedPrayer ?? nextPrayer;
+    final cardPrayer = activePrayer ?? nextPrayer ?? prayedPrayer;
     final cardStatus = activePrayer != null
         ? PrayerRuntimeStatus.active
-        : prayedPrayer != null
-        ? PrayerRuntimeStatus.prayed
         : nextPrayer != null
         ? PrayerRuntimeStatus.notStarted
+        : prayedPrayer != null
+        ? PrayerRuntimeStatus.prayed
         : null;
     final showTimeRemaining = activePrayer != null;
 
