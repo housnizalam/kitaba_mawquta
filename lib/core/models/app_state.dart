@@ -11,6 +11,7 @@ class AppState {
   final DailyPrayerSchedule todaySchedule;
   final PrayerTrackingState tracking;
   final List<DailyPrayerLog> history;
+  final DateTime selectedDate;
 
   const AppState({
     required this.settings,
@@ -18,6 +19,7 @@ class AppState {
     required this.todaySchedule,
     required this.tracking,
     required this.history,
+    required this.selectedDate,
   });
 
   AppState copyWith({
@@ -26,6 +28,7 @@ class AppState {
     DailyPrayerSchedule? todaySchedule,
     PrayerTrackingState? tracking,
     List<DailyPrayerLog>? history,
+    DateTime? selectedDate,
   }) {
     return AppState(
       settings: settings ?? this.settings,
@@ -33,6 +36,7 @@ class AppState {
       todaySchedule: todaySchedule ?? this.todaySchedule,
       tracking: tracking ?? this.tracking,
       history: history ?? this.history,
+      selectedDate: selectedDate ?? this.selectedDate,
     );
   }
 
@@ -43,6 +47,7 @@ class AppState {
       'todaySchedule': todaySchedule.toMap(),
       'tracking': tracking.toMap(),
       'history': history.map((item) => item.toMap()).toList(),
+      'selectedDate': selectedDate.toIso8601String(),
     };
   }
 
@@ -68,6 +73,9 @@ class AppState {
                 DailyPrayerLog.fromMap(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
+      selectedDate:
+          DateTime.tryParse(map['selectedDate'] as String? ?? '') ??
+          DateTime.now(),
     );
   }
 }

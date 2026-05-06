@@ -8,6 +8,8 @@ import '../../core/models/models.dart';
 import '../../core/state/app_state_notifier.dart';
 import '../../core/state/app_state_providers.dart';
 import '../../core/state/storage_service_providers.dart';
+import '../calendar/calendar_page.dart';
+import '../history/history_page.dart';
 import '../settings/settings_page.dart';
 import '../../shared/widgets/constrained_page_body.dart';
 
@@ -44,9 +46,20 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Future<void> _markCurrentPrayerAsPrayed(PrayerTimeEntry entry) async {
     final effectiveNow = DateTime.now();
-    await ref
-        .read(appStateNotifierProvider.notifier)
-        .markPrayerAsPrayed(entry.prayerType, now: effectiveNow);
+    try {
+      await ref
+          .read(appStateNotifierProvider.notifier)
+          .markPrayerAsPrayed(entry.prayerType, now: effectiveNow);
+    } on ArgumentError catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message?.toString() ?? 'Invalid action.')),
+      );
+      return;
+    }
 
     if (!mounted) {
       return;
@@ -73,6 +86,18 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  Future<void> _openHistoryPage() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const HistoryPage()));
+  }
+
+  Future<void> _openCalendarPage() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const CalendarPage()));
+  }
+
   void _showReminderPlaceholder(PrayerTimeEntry entry) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -83,7 +108,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Future<void> _openPrayerEditDialog(PrayerTimeEntry entry) async {
+  Future<void> _openPrayerEditDialog({
+    required PrayerTimeEntry entry,
+    required DateTime selectedDate,
+    required bool isSelectedDateToday,
+    required List<PrayerTimeEntry> selectedDayPrayers,
+  }) async {
     final effectiveNow = DateTime.now();
     if (effectiveNow.isBefore(entry.startTime)) {
       if (!mounted) {
@@ -99,10 +129,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
 
     final pageContext = context;
-    PrayerCompletionStatus selectedStatus =
-        entry.status == PrayerCompletionStatus.missed
-        ? PrayerCompletionStatus.missed
-        : PrayerCompletionStatus.prayed;
+    final statusOptions = _manualStatusOptions(entry: entry, now: effectiveNow);
+    PrayerCompletionStatus selectedStatus = entry.status;
+    if (!statusOptions.contains(selectedStatus)) {
+      selectedStatus = statusOptions.first;
+    }
     DateTime? selectedPrayedAt = entry.prayedAt;
     String? errorMessage;
 
@@ -164,15 +195,70 @@ class _HomePageState extends ConsumerState<HomePage> {
                 }
               }
 
+              if (selectedStatus == PrayerCompletionStatus.qada) {
+                if (selectedPrayedAt == null) {
+                  setDialogState(() {
+                    errorMessage =
+                        'Please choose a prayed time when status is qada.';
+                  });
+                  return;
+                }
+
+                if (!selectedPrayedAt!.isAfter(entry.endTime)) {
+                  setDialogState(() {
+                    errorMessage =
+                        'Qada prayed time must be after prayer end time.';
+                  });
+                  return;
+                }
+
+                if (selectedPrayedAt!.isAfter(effectiveNow)) {
+                  setDialogState(() {
+                    errorMessage = 'Qada prayed time cannot be in the future.';
+                  });
+                  return;
+                }
+              }
+
               try {
-                await ref
-                    .read(appStateNotifierProvider.notifier)
-                    .manuallyEditPrayerEntry(
-                      entry.prayerType,
-                      status: selectedStatus,
-                      prayedAt: selectedPrayedAt,
-                      now: effectiveNow,
-                    );
+                if (isSelectedDateToday) {
+                  await ref
+                      .read(appStateNotifierProvider.notifier)
+                      .manuallyEditPrayerEntry(
+                        entry.prayerType,
+                        status: selectedStatus,
+                        prayedAt: selectedPrayedAt,
+                        now: effectiveNow,
+                      );
+                } else {
+                  final prayerLogic = ref.read(prayerLogicServiceProvider);
+                  final updatedEntry = prayerLogic.applyManualPrayerCorrection(
+                    entry,
+                    status: selectedStatus,
+                    now: effectiveNow,
+                    prayedAt: selectedPrayedAt,
+                  );
+                  final updatedPrayers = selectedDayPrayers
+                      .map(
+                        (item) => item.prayerType == entry.prayerType
+                            ? updatedEntry
+                            : item,
+                      )
+                      .toList();
+
+                  await ref
+                      .read(appStateNotifierProvider.notifier)
+                      .saveOrReplaceDailyLog(
+                        DailyPrayerLog(
+                          date: DateTime(
+                            selectedDate.year,
+                            selectedDate.month,
+                            selectedDate.day,
+                          ),
+                          prayers: updatedPrayers,
+                        ),
+                      );
+                }
               } on ArgumentError catch (e) {
                 setDialogState(() {
                   errorMessage =
@@ -212,18 +298,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                       labelText: 'Status',
                       border: OutlineInputBorder(),
                     ),
-                    items:
-                        const [
-                              PrayerCompletionStatus.prayed,
-                              PrayerCompletionStatus.missed,
-                            ]
-                            .map(
-                              (status) => DropdownMenuItem(
-                                value: status,
-                                child: Text(_completionStatusLabel(status)),
-                              ),
-                            )
-                            .toList(),
+                    items: statusOptions
+                        .map(
+                          (status) => DropdownMenuItem(
+                            value: status,
+                            child: Text(_completionStatusLabel(status)),
+                          ),
+                        )
+                        .toList(),
                     onChanged: (value) {
                       if (value == null) {
                         return;
@@ -231,7 +313,8 @@ class _HomePageState extends ConsumerState<HomePage> {
 
                       setDialogState(() {
                         selectedStatus = value;
-                        if (selectedStatus != PrayerCompletionStatus.prayed) {
+                        if (selectedStatus != PrayerCompletionStatus.prayed &&
+                            selectedStatus != PrayerCompletionStatus.qada) {
                           selectedPrayedAt = null;
                         }
                         errorMessage = null;
@@ -243,7 +326,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                     'Allowed time: ${_formatTime(entry.startTime)} - ${_formatTime(entry.endTime)}',
                   ),
                   const SizedBox(height: 8),
-                  if (selectedStatus == PrayerCompletionStatus.prayed)
+                  if (selectedStatus == PrayerCompletionStatus.prayed ||
+                      selectedStatus == PrayerCompletionStatus.qada)
                     Row(
                       children: [
                         Expanded(
@@ -284,12 +368,23 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  Future<void> _resetSelectedDateToToday() async {
+    await ref
+        .read(appStateNotifierProvider.notifier)
+        .resetSelectedDateToToday();
+  }
+
   @override
   Widget build(BuildContext context) {
     final effectiveNow = DateTime.now();
     final appStateAsync = ref.watch(appStateNotifierProvider);
     final location = ref.watch(locationProvider);
-    final schedule = ref.watch(todayScheduleProvider);
+    final selectedDate = ref.watch(selectedDateProvider);
+    final isSelectedDateToday = ref.watch(isSelectedDateTodayProvider);
+    final selectedDayPrayers = ref.watch(selectedDatePrayerEntriesProvider);
+    final schedule = isSelectedDateToday
+        ? ref.watch(todayScheduleProvider)
+        : null;
     final prayerLogic = ref.watch(prayerLogicServiceProvider);
     final theme = Theme.of(context);
 
@@ -301,6 +396,24 @@ class _HomePageState extends ConsumerState<HomePage> {
           icon: const Icon(Icons.settings_outlined),
           tooltip: 'Settings',
         ),
+        actions: [
+          if (!isSelectedDateToday)
+            IconButton(
+              onPressed: _resetSelectedDateToToday,
+              icon: const Icon(Icons.today_outlined),
+              tooltip: 'Back to today',
+            ),
+          IconButton(
+            onPressed: _openCalendarPage,
+            icon: const Icon(Icons.calendar_month_outlined),
+            tooltip: 'Calendar',
+          ),
+          IconButton(
+            onPressed: _openHistoryPage,
+            icon: const Icon(Icons.history_outlined),
+            tooltip: 'History',
+          ),
+        ],
         title: const Text('Kitaba Mawquta'),
       ),
       body: appStateAsync.when(
@@ -312,7 +425,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
         data: (_) {
-          final prayers = schedule?.prayers ?? const <PrayerTimeEntry>[];
+          final prayers = selectedDayPrayers;
           final activePrayer = schedule == null
               ? null
               : prayerLogic.getCurrentActivePrayerEntry(schedule, effectiveNow);
@@ -338,34 +451,48 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _formatDate(effectiveNow),
+                  _formatDate(selectedDate),
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
+                if (!isSelectedDateToday) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Viewing past day details',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
-                _CurrentPrayerCard(
-                  now: effectiveNow,
-                  activePrayer: activePrayer,
-                  prayedPrayer: prayedPrayer,
-                  nextPrayer: nextPrayer,
-                  onPrayed: activePrayer == null
-                      ? null
-                      : () => _markCurrentPrayerAsPrayed(activePrayer),
-                  onRemindLater: activePrayer == null
-                      ? null
-                      : () => _showReminderPlaceholder(activePrayer),
-                ),
-                const SizedBox(height: 24),
+                if (isSelectedDateToday) ...[
+                  _CurrentPrayerCard(
+                    now: effectiveNow,
+                    activePrayer: activePrayer,
+                    prayedPrayer: prayedPrayer,
+                    nextPrayer: nextPrayer,
+                    onPrayed: activePrayer == null
+                        ? null
+                        : () => _markCurrentPrayerAsPrayed(activePrayer),
+                    onRemindLater: activePrayer == null
+                        ? null
+                        : () => _showReminderPlaceholder(activePrayer),
+                  ),
+                  const SizedBox(height: 24),
+                ],
                 Text(
-                  'Today\'s prayers',
+                  isSelectedDateToday
+                      ? 'Today\'s prayers'
+                      : 'Selected day prayers',
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 12),
                 if (prayers.isEmpty)
-                  _EmptyPrayerListCard(now: effectiveNow)
+                  _EmptyPrayerListCard(now: selectedDate)
                 else
                   ...prayers.map(
                     (entry) => Padding(
@@ -377,7 +504,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                           effectiveNow,
                         ),
                         isEditable: !entry.startTime.isAfter(effectiveNow),
-                        onEdit: () => _openPrayerEditDialog(entry),
+                        onEdit: () => _openPrayerEditDialog(
+                          entry: entry,
+                          selectedDate: selectedDate,
+                          isSelectedDateToday: isSelectedDateToday,
+                          selectedDayPrayers: prayers,
+                        ),
                       ),
                     ),
                   ),
@@ -416,7 +548,9 @@ class _CurrentPrayerCard extends StatelessWidget {
         : nextPrayer != null
         ? PrayerRuntimeStatus.notStarted
         : prayedPrayer != null
-        ? PrayerRuntimeStatus.prayed
+        ? prayedPrayer!.status == PrayerCompletionStatus.qada
+              ? PrayerRuntimeStatus.qada
+              : PrayerRuntimeStatus.prayed
         : null;
     final showTimeRemaining = activePrayer != null;
 
@@ -705,6 +839,8 @@ String _runtimeStatusLabel(PrayerRuntimeStatus status) {
       return 'Prayed';
     case PrayerRuntimeStatus.missed:
       return 'Missed';
+    case PrayerRuntimeStatus.qada:
+      return 'Qada';
   }
 }
 
@@ -716,6 +852,8 @@ String _completionStatusLabel(PrayerCompletionStatus status) {
       return 'Prayed';
     case PrayerCompletionStatus.missed:
       return 'Missed';
+    case PrayerCompletionStatus.qada:
+      return 'Qada';
   }
 }
 
@@ -741,5 +879,27 @@ _StatusColors _statusColors(ThemeData theme, PrayerRuntimeStatus status) {
         background: theme.colorScheme.errorContainer,
         foreground: theme.colorScheme.onErrorContainer,
       );
+    case PrayerRuntimeStatus.qada:
+      return _StatusColors(
+        background: const Color(0xFFFFF3CD),
+        foreground: const Color(0xFF8A6D00),
+      );
   }
+}
+
+List<PrayerCompletionStatus> _manualStatusOptions({
+  required PrayerTimeEntry entry,
+  required DateTime now,
+}) {
+  final options = <PrayerCompletionStatus>[
+    PrayerCompletionStatus.prayed,
+    PrayerCompletionStatus.missed,
+  ];
+
+  // Qada is edit-only and only available once prayer window has ended.
+  if (now.isAfter(entry.endTime)) {
+    options.add(PrayerCompletionStatus.qada);
+  }
+
+  return options;
 }

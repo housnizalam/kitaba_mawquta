@@ -69,6 +69,24 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
       todaySchedule: todaySchedule,
       tracking: tracking,
       history: history,
+      selectedDate: _dayOnly(now),
+    );
+  }
+
+  /// Sets the currently selected day details view date.
+  ///
+  /// Validation rule: selected date cannot be in the future.
+  Future<void> setSelectedDate(DateTime date) async {
+    final current = await _currentState();
+    final normalized = _validateAndNormalizeSelectedDate(date);
+    state = AsyncValue.data(current.copyWith(selectedDate: normalized));
+  }
+
+  /// Resets selected day details view date to today.
+  Future<void> resetSelectedDateToToday() async {
+    final current = await _currentState();
+    state = AsyncValue.data(
+      current.copyWith(selectedDate: _dayOnly(DateTime.now())),
     );
   }
 
@@ -398,6 +416,18 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
     result.sort((a, b) => a.date.compareTo(b.date));
     return result;
   }
+
+  DateTime _validateAndNormalizeSelectedDate(DateTime date) {
+    final normalized = _dayOnly(date);
+    final today = _dayOnly(DateTime.now());
+    if (normalized.isAfter(today)) {
+      throw ArgumentError('Selected date cannot be in the future.');
+    }
+
+    return normalized;
+  }
+
+  DateTime _dayOnly(DateTime date) => DateTime(date.year, date.month, date.day);
 }
 
 /// Main provider for full application state.

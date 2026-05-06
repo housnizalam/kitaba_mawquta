@@ -43,12 +43,20 @@ abstract final class AppStateDefaults {
   }
 
   static AppState initialAppState({DateTime? now}) {
+    final effectiveNow = now ?? DateTime.now();
+    final selectedDate = DateTime(
+      effectiveNow.year,
+      effectiveNow.month,
+      effectiveNow.day,
+    );
+
     return AppState(
       settings: defaultSettings(),
       location: defaultLocation(),
-      todaySchedule: defaultTodaySchedule(now: now),
+      todaySchedule: defaultTodaySchedule(now: effectiveNow),
       tracking: defaultTrackingState(),
       history: const [],
+      selectedDate: selectedDate,
     );
   }
 }

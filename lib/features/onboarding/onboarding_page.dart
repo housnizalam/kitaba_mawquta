@@ -5,6 +5,7 @@ import '../../core/models/models.dart';
 import '../../core/state/app_state_notifier.dart';
 import '../../core/state/app_state_providers.dart';
 import '../../shared/widgets/constrained_page_body.dart';
+import '../home/home_page.dart';
 
 // ---------------------------------------------------------------------------
 // Available adhan sound options.
@@ -132,10 +133,15 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
 
     if (!mounted) return;
 
-    // TODO: Navigate to home page once it is built.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings saved. Home page coming soon.')),
-    );
+    if (Navigator.of(context).canPop()) {
+      // Opened as settings screen from HomePage — return with a saved flag.
+      Navigator.of(context).pop(true);
+    } else {
+      // First launch — replace the router screen with HomePage.
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const HomePage()));
+    }
   }
 
   // -------------------------------------------------------------------------

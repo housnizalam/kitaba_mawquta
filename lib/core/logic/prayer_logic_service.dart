@@ -1,7 +1,7 @@
 import '../models/models.dart';
 
 /// Runtime prayer state used by logic helpers.
-enum PrayerRuntimeStatus { notStarted, active, prayed, missed }
+enum PrayerRuntimeStatus { notStarted, active, prayed, missed, qada }
 
 /// Contains pure local business logic for prayer state transitions.
 class PrayerLogicService {
@@ -10,7 +10,15 @@ class PrayerLogicService {
     PrayerTimeEntry entry,
     DateTime now,
   ) {
+    if (entry.status == PrayerCompletionStatus.qada) {
+      return PrayerRuntimeStatus.qada;
+    }
+
     if (entry.prayedAt != null) {
+      if (entry.prayedAt!.isAfter(entry.endTime)) {
+        return PrayerRuntimeStatus.qada;
+      }
+
       return PrayerRuntimeStatus.prayed;
     }
 
@@ -39,6 +47,8 @@ class PrayerLogicService {
         return entry.copyWith(status: PrayerCompletionStatus.prayed);
       case PrayerRuntimeStatus.missed:
         return entry.copyWith(status: PrayerCompletionStatus.missed);
+      case PrayerRuntimeStatus.qada:
+        return entry.copyWith(status: PrayerCompletionStatus.qada);
       case PrayerRuntimeStatus.notStarted:
       case PrayerRuntimeStatus.active:
         return entry.copyWith(status: PrayerCompletionStatus.pending);
@@ -59,6 +69,16 @@ class PrayerLogicService {
 
   /// Marks a prayer as completed now.
   PrayerTimeEntry markPrayerAsPrayed(PrayerTimeEntry entry, DateTime now) {
+    if (now.isBefore(entry.startTime)) {
+      throw ArgumentError('Prayer has not started yet.');
+    }
+
+    if (now.isAfter(entry.endTime)) {
+      throw ArgumentError(
+        'Prayer window has ended. Use Edit to mark this as qada.',
+      );
+    }
+
     return entry.copyWith(status: PrayerCompletionStatus.prayed, prayedAt: now);
   }
 
@@ -67,6 +87,8 @@ class PrayerLogicService {
   /// Validation rule:
   /// - If status is prayed, [prayedAt] must be inside the prayer window
   ///   (startTime <= prayedAt <= endTime).
+  /// - If status is qada, [prayedAt] must be strictly after endTime and not
+  ///   after now.
   PrayerTimeEntry applyManualPrayerCorrection(
     PrayerTimeEntry entry, {
     required PrayerCompletionStatus status,
@@ -79,7 +101,7 @@ class PrayerLogicService {
 
     if (status == PrayerCompletionStatus.pending) {
       throw ArgumentError(
-        'Pending is not allowed for manual correction. Choose prayed or missed.',
+        'Pending is not allowed for manual correction. Choose prayed, missed, or qada.',
       );
     }
 
@@ -100,6 +122,33 @@ class PrayerLogicService {
 
       return entry.copyWith(
         status: PrayerCompletionStatus.prayed,
+        prayedAt: prayedAt,
+      );
+    }
+
+    if (status == PrayerCompletionStatus.qada) {
+      if (!now.isAfter(entry.endTime)) {
+        throw ArgumentError(
+          'Qada is available only after the prayer end time.',
+        );
+      }
+
+      if (prayedAt == null) {
+        throw ArgumentError('Prayed time is required when status is qada.');
+      }
+
+      if (!prayedAt.isAfter(entry.endTime)) {
+        throw ArgumentError(
+          'Qada prayed time must be after the prayer window.',
+        );
+      }
+
+      if (prayedAt.isAfter(now)) {
+        throw ArgumentError('Qada prayed time cannot be in the future.');
+      }
+
+      return entry.copyWith(
+        status: PrayerCompletionStatus.qada,
         prayedAt: prayedAt,
       );
     }

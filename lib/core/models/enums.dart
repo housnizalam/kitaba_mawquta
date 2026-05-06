@@ -2,7 +2,7 @@
 enum PrayerType { fajr, dhuhr, asr, maghrib, isha }
 
 /// Tracks whether a prayer is still pending, completed, or missed.
-enum PrayerCompletionStatus { pending, prayed, missed }
+enum PrayerCompletionStatus { pending, prayed, missed, qada }
 
 /// Supported app languages.
 enum AppLanguage { english, arabic, german }
