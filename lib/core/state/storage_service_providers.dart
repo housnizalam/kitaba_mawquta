@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../logic/logic.dart';
+import '../schedule/schedule.dart';
 import '../storage/storage.dart';
 
 /// Provides app settings storage access.
@@ -29,3 +30,10 @@ final dailyPrayerHistoryStorageServiceProvider =
 final prayerLogicServiceProvider = Provider<PrayerLogicService>(
   (ref) => PrayerLogicService(),
 );
+
+/// Provides the prayer schedule builder service.
+final prayerScheduleBuilderServiceProvider =
+    Provider<PrayerScheduleBuilderService>(
+      (ref) =>
+          PrayerScheduleBuilderService(ref.read(prayerLogicServiceProvider)),
+    );

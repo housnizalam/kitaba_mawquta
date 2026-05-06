@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../logic/logic.dart';
 import '../models/models.dart';
+import '../schedule/schedule.dart';
 import 'app_state_defaults.dart';
 import 'storage_service_providers.dart';
 
@@ -222,6 +223,35 @@ class AppStateNotifier extends AsyncNotifier<AppState> {
 
     state = AsyncValue.data(
       current.copyWith(todaySchedule: updatedSchedule, tracking: tracking),
+    );
+  }
+
+  /// Builds a [DailyPrayerSchedule] from [RawDailyPrayerTimes], persists it,
+  /// and updates app state — including synchronized statuses and tracking.
+  Future<void> buildAndSaveTodaySchedule(
+    RawDailyPrayerTimes rawTimes, {
+    DateTime? now,
+  }) async {
+    final current = await _currentState();
+    final builder = ref.read(prayerScheduleBuilderServiceProvider);
+    final prayerLogicService = ref.read(prayerLogicServiceProvider);
+    final effectiveNow = now ?? DateTime.now();
+
+    final builtSchedule = builder.buildSchedule(rawTimes, now: effectiveNow);
+
+    await ref
+        .read(todayScheduleStorageServiceProvider)
+        .saveTodaySchedule(builtSchedule);
+
+    final tracking = _buildTrackingFromSchedule(
+      schedule: builtSchedule,
+      currentTracking: current.tracking,
+      now: effectiveNow,
+      prayerLogicService: prayerLogicService,
+    );
+
+    state = AsyncValue.data(
+      current.copyWith(todaySchedule: builtSchedule, tracking: tracking),
     );
   }
 
